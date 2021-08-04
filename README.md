@@ -67,6 +67,6 @@ The same arguments are used as in _sim_patients.py_ to specify on which network 
 Executing **visuals.py** shows the parameter maps created from different specified frameworks.
 
 #### Bland-Altman Plots
-Executing **bland_altman.py** creates bland_altman plots from the specified frameworks and the non-linear least squares method.
+Executing **bland_altman.py** creates bland-altman plots from the specified frameworks and the non-linear least squares method.
 
 The same arguments are used as in _sim_patients.py_ to specify from which network the bland_altman plots are created. 
