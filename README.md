@@ -1,5 +1,7 @@
 # DCE-NET
-Framework for estimating DCE-MRI physiological parameters
+Framework for estimating DCE-MRI physiological parameters. 
+
+Based on the master thesis: [DCE-MRI parameter estimation using a physics-based deep learning approach](https://scripties.uba.uva.nl/download?fid=682699)
 
 ## Getting Started:
 To create the environment **dce** in anaconda, the following command can be used:
