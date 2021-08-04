@@ -1,6 +1,12 @@
 # DCE-NET
 Framework for estimating DCE-MRI physiological parameters
 
+## Getting Started:
+To create the environment **dce** in anaconda, the following command can be used:
+```bash
+conda env create -f environment.yml
+```
+
 ## Simulations:
 Executing the framework on simulations can be done using **main.py**.
 ```
