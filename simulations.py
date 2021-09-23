@@ -54,6 +54,9 @@ def run_simulations(hp, SNR=15, eval=False, var_seq=False):
             aif = hp.aif.aif
             aif['ab'] /= (1-hp.aif.Hct)
 
+        if hp.network.full_aif or eval:
+            AIF_curves = np.zeros((len(Hct), rep2))
+
         for aa in tqdm(range(len(kep))):
             if hp.network.aif:
                 aif = hp.aif.aif.copy()
@@ -64,6 +67,10 @@ def run_simulations(hp, SNR=15, eval=False, var_seq=False):
 
             R1eff[aa, :] = classic.con_to_R1eff(C[aa, :], R1[aa][0], hp.acquisition.r1)
             X_dw[aa, :] = classic.r1eff_to_dce(R1eff[aa, :], hp.acquisition.TR, hp.acquisition.FAlist)
+
+            if hp.network.full_aif or eval:
+                AIF_curves[aa] = dce.Cosine8AIF(hp.acquisition.timing, aif['ab'], aif['ar'], aif['ae'], aif['mb'], 
+                                                aif['mm'], aif['mr'], aif['me'], aif['tr'], aif['t0'])
 
         # scale the signal to the baseline signal
         S0_out = np.mean(X_dw[:, :rep2//10], axis=1)
@@ -87,7 +94,10 @@ def run_simulations(hp, SNR=15, eval=False, var_seq=False):
             C1 = dce.r1eff_to_conc(R1eff2, R1, hp.acquisition.r1)
 
             dce_signal_noisy = C1
-            data = [dce_signal_noisy, hp, Hct, kep, ve, vp, Tonset]
+            if hp.network.full_aif or eval:
+                data = [dce_signal_noisy, hp, Hct, kep, ve, vp, Tonset, AIF_curves]
+            else:
+                data = [dce_signal_noisy, hp, Hct, kep, ve, vp, Tonset]
 
             # change name when varying SNR or acquisition points
             if eval:
@@ -114,7 +124,10 @@ def run_simulations(hp, SNR=15, eval=False, var_seq=False):
         else:
             hp.create_name_copy = hp.create_name
 
-        dce_signal_noisy, hp_data, Hct, kep, ve, vp, Tonset = pickle.load(open(hp.create_name_copy, "rb"))
+        if hp.network.full_aif or eval:
+            dce_signal_noisy, hp_data, Hct, kep, ve, vp, Tonset, AIF_curves = pickle.load(open(hp.create_name_copy, "rb"))
+        else:
+            dce_signal_noisy, hp_data, Hct, kep, ve, vp, Tonset = pickle.load(open(hp.create_name_copy, "rb"))
 
         time_passed = time.time() - begin
         print('{} data points, loading time:{:2f} s'.format(len(dce_signal_noisy), time_passed))
@@ -144,9 +157,14 @@ def run_simulations(hp, SNR=15, eval=False, var_seq=False):
         net = model.DCE_NET(hp).to(hp.device)
         net.load_state_dict(torch.load('pretrained/pretrained_'+hp.exp_name+'.pt'))
         net.to(hp.device)
+        if hp.network.full_aif:
+            Hct = np.concatenate([Hct[:, np.newaxis], AIF_curves], axis=1)
 
     # start training for neural networks
     else:
+        if hp.network.full_aif:
+            Hct = np.concatenate([Hct[:, np.newaxis], AIF_curves], axis=1)
+
         if hp.pretrained:
             net = model.DCE_NET(hp).to(hp.device)
             net.load_state_dict(torch.load(hp.pretrain_name))
@@ -196,7 +214,16 @@ def predict_DCE(C1, net, hp, Hct=None, one_dim=True):
 
     # temporal framework
     if one_dim:
-        C1 = np.concatenate([Hct[:, np.newaxis], C1], axis=1)
+        if hp.network.full_aif:
+            C1 = np.concatenate([Hct, C1], axis=1)
+        else: 
+            C1 = np.concatenate([Hct[:, np.newaxis], C1], axis=1)
+        
+        ke = torch.zeros(len(C1))
+        ve = torch.zeros(len(C1))
+        vp = torch.zeros(len(C1))
+        dt = torch.zeros(len(C1))
+        X = torch.zeros((len(C1), 160))
 
     # spatiotemporal framework
     else:
@@ -204,6 +231,12 @@ def predict_DCE(C1, net, hp, Hct=None, one_dim=True):
         Hct = np.repeat(np.repeat(Hct, C1.shape[1], axis=1), C1.shape[2], axis=2)
         C1 = np.concatenate([Hct, C1], axis=3)
         C1 = np.moveaxis(C1, 3, 1)
+
+        ke = torch.zeros((C1.shape[0], C1.shape[2], C1.shape[3]))
+        ve = torch.zeros((C1.shape[0], C1.shape[2], C1.shape[3]))
+        vp = torch.zeros((C1.shape[0], C1.shape[2], C1.shape[3]))
+        dt = torch.zeros((C1.shape[0], C1.shape[2], C1.shape[3]))
+        X = torch.zeros((C1.shape[0], 160, C1.shape[2], C1.shape[3]))
 
     C1 = torch.from_numpy(C1.astype(np.float32))
 
@@ -213,32 +246,42 @@ def predict_DCE(C1, net, hp, Hct=None, one_dim=True):
                                    drop_last=False)
 
     # perform inference
+    size = hp.training.val_batch_size
+
     with torch.no_grad():
         for i, X_batch in enumerate(tqdm(inferloader, position=0, leave=True), 0):
             X_batch = X_batch.to(hp.device)
 
-            X_dw, ket, dtt, vet, vpt = net(X_batch[:, 1:], Hct=X_batch[:, 0])
-
-            if first_params:
-                ke = ket.cpu().numpy()
-                dt = dtt.cpu().numpy()
-                ve = vet.cpu().numpy()
-                vp = vpt.cpu().numpy()
-                X = X_dw.cpu().numpy()
-                first_params = False
-
+            if hp.network.full_aif:
+                X_dw, ket, dtt, vet, vpt = net(X_batch[:, hp.acquisition.rep2:], Hct=X_batch[:, :hp.acquisition.rep2])
             else:
-                ke = np.concatenate((ke, ket.cpu().numpy()), axis=0)
-                dt = np.concatenate((dt, dtt.cpu().numpy()), axis=0)
-                ve = np.concatenate((ve, vet.cpu().numpy()), axis=0)
-                vp = np.concatenate((vp, vpt.cpu().numpy()), axis=0)
-                X = np.concatenate((X, X_dw.cpu().numpy()), axis=0)
+                X_dw, ket, dtt, vet, vpt = net(X_batch[:, 1:], Hct=X_batch[:, :1])
 
-    ve = np.squeeze(ve)
-    vp = np.squeeze(vp)
-    ke = np.squeeze(ke)
-    dt = np.squeeze(dt)
-    X = np.squeeze(X)
+            ke[i*size:(i+1)*size] = ket.cpu().squeeze()
+            ve[i*size:(i+1)*size] = vet.cpu().squeeze()
+            vp[i*size:(i+1)*size] = vpt.cpu().squeeze()
+            dt[i*size:(i+1)*size] = dtt.cpu().squeeze()
+            X[i*size:(i+1)*size] = X_dw.cpu().squeeze()
+            # if first_params:
+            #     ke = ket.cpu().numpy()
+            #     dt = dtt.cpu().numpy()
+            #     ve = vet.cpu().numpy()
+            #     vp = vpt.cpu().numpy()
+            #     X = X_dw.cpu().numpy()
+            #     first_params = False
+
+            # else:
+            #     ke = np.concatenate((ke, ket.cpu().numpy()), axis=0)
+            #     dt = np.concatenate((dt, dtt.cpu().numpy()), axis=0)
+            #     ve = np.concatenate((ve, vet.cpu().numpy()), axis=0)
+            #     vp = np.concatenate((vp, vpt.cpu().numpy()), axis=0)
+            #     X = np.concatenate((X, X_dw.cpu().numpy()), axis=0)
+
+    ke = np.array(ke)
+    ve = np.array(ve)
+    vp = np.array(vp)
+    dt = np.array(dt)
+    X = np.array(X)
 
     params = [ke, dt, ve, vp, X]
 
@@ -266,7 +309,7 @@ def sim_results(paramsNN_full, hp, kep, ve, vp, Tonset, Hct=None):
     error_dt = paramsNN_full[1] - (np.squeeze(Tonset) + rep1 * hp.simulations.time) / 60
     randerror_dt = np.std(error_dt)
     syserror_dt = np.mean(error_dt)
-    del error_dt, paramsNN_full
+    del error_dt
 
     normke = np.mean(kep)
     normve = np.mean(ve)
@@ -278,7 +321,9 @@ def sim_results(paramsNN_full, hp, kep, ve, vp, Tonset, Hct=None):
     print([normvp, '  ', randerror_vp, '  ', syserror_vp])
     print([normdt, '  ', randerror_dt, '  ', syserror_dt])
 
-    return np.array([[randerror_ke, syserror_ke],
-                     [randerror_ve, syserror_ve],
-                     [randerror_vp, syserror_vp],
-                     [randerror_dt, syserror_dt]])
+    # return np.array([[randerror_ke, syserror_ke],
+    #                  [randerror_ve, syserror_ve],
+    #                  [randerror_vp, syserror_vp],
+    #                  [randerror_dt, syserror_dt]])
+
+    return np.array(paramsNN_full[:4])

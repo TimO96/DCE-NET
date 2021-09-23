@@ -38,9 +38,9 @@ if args.dataset == 'MIPA':
 elif args.dataset == 'REPRO':
     Hct_data = {}
     Hct_data_REMP = np.array(pd.read_excel(rootdir+'REMP_patienten.xlsx')['HCTcalc'])
-    for i in range(1, 11):
+    for i in range(16):
         for j in range(1, 3):
-            patient_num = 'REMP{:02d}_{}'.format(i, j)
+            patient_num = 'REMP{:02d}_{}'.format(i+1, j)
             Hct_data[patient_num] = Hct_data_REMP[i]
 
 else:

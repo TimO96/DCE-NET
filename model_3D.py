@@ -275,6 +275,54 @@ class DCE_NET(nn.Module):
                                                 nn.ELU(),
                                                 nn.Linear(int(self.hp.network.layers[-1]/2), 1)
                                                 )
+        
+        elif self.hp.network.nn == 'gruconv':
+            self.rnn = nn.GRU(1, self.hp.network.layers[0], self.hp.network.layers[1], batch_first=True)
+            hidden_dim = self.hp.network.layers[0]
+
+            self.score_ke = nn.Sequential(nn.Linear(hidden_dim, 1), nn.Softmax(dim=1))
+            self.score_ve = nn.Sequential(nn.Linear(hidden_dim, 1), nn.Softmax(dim=1))
+            self.score_vp = nn.Sequential(nn.Linear(hidden_dim, 1), nn.Softmax(dim=1))
+            self.score_dt = nn.Sequential(nn.Linear(hidden_dim, 1), nn.Softmax(dim=1))
+
+            self.encoder_ke = nn.Sequential(nn.Linear(hidden_dim, int((hidden_dim)/2)),
+                                            #nn.BatchNorm1d(int((self.hp.network.layers[0]+1)/2)),
+                                            nn.ELU(),
+                                            nn.Linear(int((hidden_dim)/2), 1)
+                                            )
+            self.encoder_ve = nn.Sequential(nn.Linear(hidden_dim, int((hidden_dim)/2)),
+                                            #nn.BatchNorm1d(int((self.hp.network.layers[0]+1)/2)),
+                                            nn.ELU(),
+                                            nn.Linear(int((hidden_dim)/2), 1)
+                                            )
+            self.encoder_vp = nn.Sequential(nn.Linear(hidden_dim, int((hidden_dim)/2)),
+                                            #nn.BatchNorm1d(int((self.hp.network.layers[0]+1)/2)),
+                                            nn.ELU(),
+                                            nn.Linear(int((hidden_dim)/2), 1)
+                                            )
+            self.encoder_dt = nn.Sequential(nn.Linear(hidden_dim, int((hidden_dim)/2)),
+                                            #nn.BatchNorm1d(int((self.hp.network.layers[0]+1)/2)),
+                                            nn.ELU(),
+                                            nn.Linear(int((hidden_dim)/2), 1)
+                                            )
+
+            self.conv_params = {'ke':[], 've':[], 'vp':[], 'dt':[]}
+
+            input_dim = self.hp.network.layers[0]
+
+            for param in self.conv_params:
+                self.conv_layers_list = nn.ModuleList()
+                for feature_dim in self.hp.network.layers[2:]:
+                    self.conv_layers_list.extend([nn.Conv2d(input_dim, feature_dim, 3, padding=1),
+                                                    nn.BatchNorm2d(feature_dim),
+                                                    nn.ELU()
+                                                    ])
+                    input_dim = feature_dim
+
+                self.conv_layers_list.extend([nn.Conv2d(input_dim, 1, 3, padding=1)])
+                
+                self.conv_layers = nn.Sequential(*self.conv_layers_list)
+                self.conv_params[param] = self.conv_layers
 
         elif self.hp.network.nn == 'unet':
             self.init_dim = self.hp.network.layers[0]
@@ -399,6 +447,35 @@ class DCE_NET(nn.Module):
             else:
                 output = torch.moveaxis(last_state_list[0][0], 1, 3)
                 params = self.fc_layers(torch.cat((output, Hct.unsqueeze(3)), axis=3).view(-1, output.shape[-1]+1))
+
+        elif self.hp.network.nn == 'gruconv':
+            output_ke = torch.zeros((X.size(0), X.size(1), X.size(2), self.hp.network.layers[0]+1))
+            output_ve = torch.zeros((X.size(0), X.size(1), X.size(2), self.hp.network.layers[0]+1))
+            output_vp = torch.zeros((X.size(0), X.size(1), X.size(2), self.hp.network.layers[0]+1))
+            output_dt = torch.zeros((X.size(0), X.size(1), X.size(2), self.hp.network.layers[0]+1))
+            for i in range(X.size(0)):
+                for j in range(X.size(1)):
+                    output_batch, _ = self.rnn(X[i, j].unsqueeze(2))
+
+                    score_ke = self.score_ke(output_batch)
+                    score_ve = self.score_ve(output_batch)
+                    score_vp = self.score_vp(output_batch)
+                    score_dt = self.score_dt(output_batch)
+
+                    hidden_ke = torch.cat((torch.sum(output_batch*score_ke, dim=1), Hct[i, j].unsqueeze(1)), axis=1).squeeze()
+                    hidden_ve = torch.cat((torch.sum(output_batch*score_ve, dim=1), Hct[i, j].unsqueeze(1)), axis=1).squeeze()
+                    hidden_vp = torch.cat((torch.sum(output_batch*score_vp, dim=1), Hct[i, j].unsqueeze(1)), axis=1).squeeze()
+                    hidden_dt = torch.cat((torch.sum(output_batch*score_dt, dim=1), Hct[i, j].unsqueeze(1)), axis=1).squeeze()
+
+                    output_ke[i, j] = hidden_ke
+                    output_ve[i, j] = hidden_ve
+                    output_vp[i, j] = hidden_vp
+                    output_dt[i, j] = hidden_dt
+
+            ke = self.conv_params['ke'](output_ke.moveaxis(3, 1)).squeeze()
+            ve = self.conv_params['ve'](output_ve.moveaxis(3, 1)).squeeze()
+            vp = self.conv_params['vp'](output_vp.moveaxis(3, 1)).squeeze()
+            dt = self.conv_params['dt'](output_dt.moveaxis(3, 1)).squeeze()
 
         elif self.hp.network.nn == 'unet':
             unet_dict = {}

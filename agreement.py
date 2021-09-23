@@ -108,8 +108,11 @@ def mean_diff_plot(m1, m2, xbound, ybound, decimal, label, sd_limit=1.96, ax=Non
         kwds['linestyle'] = ':'
 
     ax.scatter(means[9:], diffs[9:], **scatter_kwds)  # Plot the means against the diffs.
+    patients = ['01', '02', '03', '04', '06', '11', '12', '14', '15']
     for i in range(9):
-        ax.scatter(means[i], diffs[i], **scatter_kwds, marker='x')
+        ax.scatter(means[i], diffs[i], **scatter_kwds)
+        ax.text(means[i], diffs[i], 'CR'+patients[i], color='red')
+
     ax.axhline(mean_diff, **mean_line_kwds)  # draw mean line.
 
     if sd_limit > 0:

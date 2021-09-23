@@ -3,6 +3,7 @@ import argparse
 import numpy as np
 import simulations as sim
 import os
+import torch
 
 # np.random.seed(42)
 # torch.manual_seed(42)
@@ -16,6 +17,9 @@ parser.add_argument('--batch_size', type=int, default=128)
 parser.add_argument('--attention', action='store_true', default=False)
 parser.add_argument('--bidirectional', action='store_true', default=False)
 parser.add_argument('--supervised', action='store_true', default=False)
+parser.add_argument('--full_aif', action='store_true', default=False)
+parser.add_argument('--cpu', action='store_true', default=False)
+parser.add_argument('--exp', type=int, default=0)
 parser.add_argument('--results', action='store_true', default=False)
 
 args = parser.parse_args()
@@ -29,16 +33,25 @@ hp.network.layers = args.layers
 hp.network.attention = args.attention
 hp.network.bidirectional = args.bidirectional
 hp.supervised = args.supervised
+hp.network.full_aif = args.full_aif
+if args.cpu:
+    hp.device = torch.device('cpu')
+
+if args.full_aif and not args.results:
+    hp.create_name = hp.create_name.replace('.p', '_full_aif.p')
 
 # create save name for framework
 hp.exp_name = ''
 arg_dict = vars(args)
 for i, arg in enumerate(arg_dict):
-    if i == len(arg_dict)-2:
+    if i == len(arg_dict)-4:
         hp.exp_name += str(arg_dict[arg])
         break
     else:
         hp.exp_name += '{}_'.format(arg_dict[arg])
+
+if args.exp!=0:
+    hp.exp_name += '_'+str(args.exp)
 
 print(hp.exp_name)
 
@@ -65,7 +78,7 @@ if hp.network.nn == 'lsq':
 
 # train a neural network based approach
 elif not args.results:
-    sim.run_simulations(hp, SNR='all')
+    sim.run_simulations(hp, SNR=7)
 
 # passing --results will perform evaluation on the given framework
 else:
@@ -93,7 +106,7 @@ else:
         np.save('results'+hp.exp_name+'_var_seq.npy', params)
 
     else:
-        params = np.zeros((len(SNRs), 4, 2))
+        params = np.zeros((len(SNRs), 4, 10000))
         for i, SNR in enumerate(SNRs):
             file = hp.create_name.replace('.p', '')+'_'+str(SNR)+'.p'
             if os.path.exists(file):

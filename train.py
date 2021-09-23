@@ -63,7 +63,10 @@ def train(C1, hp, net=None, Hct=None, orig_params=None):
     if net is None:
         net = model.DCE_NET(copy.deepcopy(hp)).to(hp.device)
 
-    C1 = np.concatenate([Hct[:, np.newaxis], C1], axis=1)
+    if hp.network.full_aif:
+        C1 = np.concatenate([Hct, C1], axis=1)
+    else:
+        C1 = np.concatenate([Hct[:, np.newaxis], C1], axis=1)
 
     # Loss function and optimizer
     if hp.network.weighted_loss:
@@ -123,7 +126,12 @@ def train(C1, hp, net=None, Hct=None, orig_params=None):
     loss_val = []
     loss_train_curve = []
     loss_val_curve = []
-    bound = hp.max_rep+1
+    if hp.network.full_aif:
+        begin = hp.acquisition.rep2
+        end = 2*hp.max_rep+1
+    else:
+        begin = 1
+        end = hp.max_rep+1
 
     for epoch in range(hp.training.epochs):
         print("-----------------------------------------------------------------")
@@ -144,15 +152,17 @@ def train(C1, hp, net=None, Hct=None, orig_params=None):
 
             optimizer.zero_grad()
 
-            X_pred, ke, dt, ve, vp = net(X_batch[:, 1:bound], Hct=X_batch[:, 0])
+            X_pred, ke, dt, ve, vp = net(X_batch[:, begin:end], Hct=X_batch[:, :begin])
+
+            plt.show()
 
             if hp.supervised:
                 pred_params = torch.stack((ke, ve, vp, dt)).squeeze().to(hp.device)
-                loss = criterion(pred_params.T/norm, X_batch[:, bound:bound+4]/norm)
-                loss_curve = criterion(X_pred, X_batch[:, 1:bound])
+                loss = criterion(pred_params.T/norm, X_batch[:, end:end+4]/norm)
+                loss_curve = criterion(X_pred, X_batch[:, begin:end])
                 train_loss_curve += loss_curve.item()
             else:
-                loss = criterion(X_pred[:, :bound], X_batch[:, 1:bound])
+                loss = criterion(X_pred[:, :end], X_batch[:, begin:end])
 
             loss.backward()
             optimizer.step()
@@ -163,16 +173,16 @@ def train(C1, hp, net=None, Hct=None, orig_params=None):
             for i, X_batch in enumerate(tqdm(valloader, position=0, leave=True), 0):
                 X_batch = X_batch.to(hp.device)
 
-                X_pred, ke, dt, ve, vp = net(X_batch[:, 1:bound], Hct=X_batch[:, 0])
+                X_pred, ke, dt, ve, vp = net(X_batch[:, begin:end], Hct=X_batch[:, :begin])
 
                 if hp.supervised:
                     pred_params = torch.stack((ke, ve, vp, dt)).squeeze().to(hp.device)
-                    loss = criterion(pred_params.T/norm, X_batch[:, bound:bound+4]/norm)
-                    loss_curve = criterion(X_pred, X_batch[:, 1:bound])
+                    loss = criterion(pred_params.T/norm, X_batch[:, begin:end+4]/norm)
+                    loss_curve = criterion(X_pred, X_batch[:, begin:end])
                     val_loss_curve += loss_curve.item()
 
                 else:
-                    loss = criterion(X_pred[:, :bound], X_batch[:, 1:bound])
+                    loss = criterion(X_pred[:, :end], X_batch[:, begin:end])
 
                 val_loss += loss.item()
 
@@ -229,7 +239,7 @@ def train(C1, hp, net=None, Hct=None, orig_params=None):
                 break
 
         # calculate the best, median and worst fits based on NMSE loss
-        all_losses = NMSE_loss(X_pred, X_batch[:, 1:bound], reduction='eval')
+        all_losses = NMSE_loss(X_pred, X_batch[:, begin:end], reduction='eval')
 
         values_top, inds_top = torch.topk(all_losses, int(len(all_losses)/2))
         values_bottom, inds_bottom = torch.topk(all_losses, 2, largest=False)
@@ -256,7 +266,10 @@ def do_plots(hp, epoch, X_batch, X_pred, loss_train, loss_val, values, loss_trai
     # plot loss history
     hp.acquisition.timing = hp.acquisition.timing.cpu()
     plt.close('all')
-    X_batch = X_batch[:, 1:len(hp.acquisition.timing)+1]
+    if hp.network.full_aif:
+        X_batch = X_batch[:, hp.acquisition.rep2:2*hp.max_rep+1]
+    else:
+        X_batch = X_batch[:, 1:len(hp.acquisition.timing)+1]
 
     labels = ['worst', 'median', 'best']
     fig, axs = plt.subplots(int(len(values)/2)+1, 2, figsize=(6, 5))

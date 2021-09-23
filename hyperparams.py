@@ -30,6 +30,7 @@ class network_building_hyper_parameters:
         self.attention = False
         self.weighted_loss = False
         self.aif = True
+        self.full_aif = False
         self.constrained = True
         self.dual_path = False
         self.bidirectional = False
@@ -37,7 +38,7 @@ class network_building_hyper_parameters:
 
 class simulation_hyper_parameters:
     def __init__(self):
-        self.num_samples = 100000
+        self.num_samples = 500000
         self.num_samples_leval = 5000
         self.data_length = 160
         self.vp_min = 0.001
@@ -48,7 +49,7 @@ class simulation_hyper_parameters:
         self.kep_max = 2.
         self.R1_min = 1/2
         self.R1_max = 1/0.3
-        self.time = 1.632  # 2.894
+        self.time = 1.75 # 1.632 - 2.894
         self.Tonset_min = self.time * self.data_length//6
         self.Tonset_max = self.time * self.data_length//5
         self.dt_min = self.Tonset_min/60
@@ -64,7 +65,7 @@ class simulation_hyper_parameters:
 class acquisition_parameters:
     def __init__(self):
         self.S0 = 1000.
-        self.r1 = 4.3
+        self.r1 = 5.0
         self.TR = 3.2e-3  # 7.2e-3 in ms for the new toolbox
         self.FA1 = 4./180*3.14159  # 4./180*3.14159
         self.FA2 = 20./180*3.14159  # 24./180*3.14159

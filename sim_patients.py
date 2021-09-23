@@ -35,7 +35,7 @@ file_data = 'all_patient_data_MIPA_ip.p'
 C1s, hcts = pickle.load(open(file_data, "rb"))
 print('dataset loaded')
 
-if args.nn in ['lstm', 'gru', 'convgru']:
+if args.nn in ['lstm', 'gru', 'convgru', 'gruconv']:
     hp.network.attention = True
 
 hp.network.nn = args.nn
@@ -50,7 +50,7 @@ hp.network.bidirectional = args.bidirectional
 if args.cpu:
     hp.device = torch.device('cpu')
 
-if hp.network.nn in ['convlin', 'convgru', 'unet']:
+if hp.network.nn in ['convlin', 'convgru', 'unet', 'gruconv']:
     spatiotemporal = True
 
 # Compute parameters of AIF according to Cosine8AIF
@@ -113,7 +113,6 @@ if spatiotemporal:
                                                                                                ))
 
 elif args.nn != 'lsq':
-    hp.training.val_batch_size = 160*160
     hp.acquisition.timing = torch.FloatTensor(hp.acquisition.timing).to(hp.device)
     hp.acquisition.FAlist = [hp.acquisition.FA2]
     C1s[np.mean(C1s, axis=3) < 1e-2] = 1e-8

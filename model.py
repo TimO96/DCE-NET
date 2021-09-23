@@ -43,22 +43,26 @@ class DCE_NET(nn.Module):
                                          )
 
         elif self.hp.network.nn in ['lstm', 'gru']:
+            features = 1
+            if self.hp.network.full_aif:
+                features +=1
+
             if self.hp.network.nn == 'lstm':
                 if self.hp.network.bidirectional:
-                    self.rnn = nn.LSTM(1, self.hp.network.layers[0], self.hp.network.layers[1], batch_first=True, bidirectional=True)
+                    self.rnn = nn.LSTM(features, self.hp.network.layers[0], self.hp.network.layers[1], batch_first=True, bidirectional=True)
                     hidden_dim = self.hp.network.layers[0]*2
 
                 else:
-                    self.rnn = nn.LSTM(1, self.hp.network.layers[0], self.hp.network.layers[1], batch_first=True)
+                    self.rnn = nn.LSTM(features, self.hp.network.layers[0], self.hp.network.layers[1], batch_first=True)
                     hidden_dim = self.hp.network.layers[0]
 
             else:
                 if self.hp.network.bidirectional:
-                    self.rnn = nn.GRU(1, self.hp.network.layers[0], self.hp.network.layers[1], batch_first=True, bidirectional=True)
+                    self.rnn = nn.GRU(features, self.hp.network.layers[0], self.hp.network.layers[1], batch_first=True, bidirectional=True)
                     hidden_dim = self.hp.network.layers[0]*2
 
                 else:
-                    self.rnn = nn.GRU(1, self.hp.network.layers[0], self.hp.network.layers[1], batch_first=True)
+                    self.rnn = nn.GRU(features, self.hp.network.layers[0], self.hp.network.layers[1], batch_first=True)
                     hidden_dim = self.hp.network.layers[0]
 
             if self.hp.network.attention:
@@ -67,44 +71,54 @@ class DCE_NET(nn.Module):
                 self.score_vp = nn.Sequential(nn.Linear(hidden_dim, 1), nn.Softmax(dim=1))
                 self.score_dt = nn.Sequential(nn.Linear(hidden_dim, 1), nn.Softmax(dim=1))
 
-                self.encoder_ke = nn.Sequential(nn.Linear(hidden_dim+1, int((hidden_dim+1)/2)),
+                if not self.hp.network.full_aif:
+                    hidden_dim+=1
+
+                self.encoder_ke = nn.Sequential(nn.Linear(hidden_dim, int((hidden_dim)/2)),
                                                 #nn.BatchNorm1d(int((self.hp.network.layers[0]+1)/2)),
                                                 nn.ELU(),
-                                                nn.Linear(int((hidden_dim+1)/2), 1)
+                                                nn.Linear(int((hidden_dim)/2), 1)
                                                 )
-                self.encoder_ve = nn.Sequential(nn.Linear(hidden_dim+1, int((hidden_dim+1)/2)),
+                self.encoder_ve = nn.Sequential(nn.Linear(hidden_dim, int((hidden_dim)/2)),
                                                 #nn.BatchNorm1d(int((self.hp.network.layers[0]+1)/2)),
                                                 nn.ELU(),
-                                                nn.Linear(int((hidden_dim+1)/2), 1)
+                                                nn.Linear(int((hidden_dim)/2), 1)
                                                 )
-                self.encoder_vp = nn.Sequential(nn.Linear(hidden_dim+1, int((hidden_dim+1)/2)),
+                self.encoder_vp = nn.Sequential(nn.Linear(hidden_dim, int((hidden_dim)/2)),
                                                 #nn.BatchNorm1d(int((self.hp.network.layers[0]+1)/2)),
                                                 nn.ELU(),
-                                                nn.Linear(int((hidden_dim+1)/2), 1)
+                                                nn.Linear(int((hidden_dim)/2), 1)
                                                 )
-                self.encoder_dt = nn.Sequential(nn.Linear(hidden_dim+1, int((hidden_dim+1)/2)),
+                self.encoder_dt = nn.Sequential(nn.Linear(hidden_dim, int((hidden_dim)/2)),
                                                 #nn.BatchNorm1d(int((self.hp.network.layers[0]+1)/2)),
                                                 nn.ELU(),
-                                                nn.Linear(int((hidden_dim+1)/2), 1)
+                                                nn.Linear(int((hidden_dim)/2), 1)
                                                 )
 
             else:
-                self.encoder = nn.Sequential(nn.Linear(hidden_dim+1, int((hidden_dim+1)/2)),
+                if not self.hp.network.full_aif:
+                    hidden_dim+=1
+
+                self.encoder = nn.Sequential(nn.Linear(hidden_dim, int((hidden_dim)/2)),
                                              #nn.BatchNorm1d(int((self.hp.network.layers[0]+1)/2)),
                                              nn.ELU(),
-                                             nn.Linear(int((hidden_dim+1)/2), 4)
+                                             nn.Linear(int((hidden_dim)/2), 4)
                                              )
 
     def forward(self, X, Hct=None, first=False, epoch=0):
         if self.hp.network.nn == 'linear':
             output = self.linear(X)
-            params = self.encoder(torch.cat((output, Hct.unsqueeze(1)), axis=1))
+            params = self.encoder(torch.cat((output, Hct), axis=1))
 
         elif self.hp.network.nn in ['lstm', 'gru']:
+            input = X.unsqueeze(dim=2)
+            if self.hp.network.full_aif:
+                input = torch.cat((input, Hct[:, 1:].unsqueeze(dim=2)), dim=2)
+
             if self.hp.network.nn == 'lstm':
-                output, (hn, cn) = self.rnn(X.unsqueeze(dim=2))
+                output, (hn, cn) = self.rnn(input)
             else:
-                output, hn = self.rnn(X.unsqueeze(dim=2))
+                output, hn = self.rnn(input)
 
             if self.hp.network.attention:
                 score_ke = self.score_ke(output)
@@ -138,13 +152,22 @@ class DCE_NET(nn.Module):
                 hidden_vp = torch.sum(output*score_vp, dim=1)
                 hidden_dt = torch.sum(output*score_dt, dim=1)
 
-                ke = self.encoder_ke(torch.cat((hidden_ke, Hct.unsqueeze(1)), axis=1)).squeeze()
-                ve = self.encoder_ve(torch.cat((hidden_ve, Hct.unsqueeze(1)), axis=1)).squeeze()
-                vp = self.encoder_vp(torch.cat((hidden_vp, Hct.unsqueeze(1)), axis=1)).squeeze()
-                dt = self.encoder_dt(torch.cat((hidden_dt, Hct.unsqueeze(1)), axis=1)).squeeze()
+                if self.hp.network.full_aif:
+                    ke = self.encoder_ke(hidden_ke).squeeze()
+                    ve = self.encoder_ve(hidden_ve).squeeze()
+                    vp = self.encoder_vp(hidden_vp).squeeze()
+                    dt = self.encoder_dt(hidden_dt).squeeze()
+                else:
+                    ke = self.encoder_ke(torch.cat((hidden_ke, Hct), axis=1)).squeeze()
+                    ve = self.encoder_ve(torch.cat((hidden_ve, Hct), axis=1)).squeeze()
+                    vp = self.encoder_vp(torch.cat((hidden_vp, Hct), axis=1)).squeeze()
+                    dt = self.encoder_dt(torch.cat((hidden_dt, Hct), axis=1)).squeeze()
 
             else:
-                params = self.encoder(torch.cat((hn[-1], Hct.unsqueeze(1)), axis=1))
+                if self.hp.network.full_aif:
+                    params = self.encoder(hn[-1])
+                else:
+                    params = self.encoder(torch.cat((hn[-1], Hct), axis=1))
 
         ke_diff = self.hp.simulations.bounds[1, 0] - self.hp.simulations.bounds[0, 0]
         ve_diff = self.hp.simulations.bounds[1, 1] - self.hp.simulations.bounds[0, 1]
@@ -166,7 +189,7 @@ class DCE_NET(nn.Module):
         aif = torch.zeros(len(self.hp.aif.aif), X.size(0)).to(self.hp.device)
         aif[0] = self.hp.aif.aif['t0']
         aif[1] = self.hp.aif.aif['tr']
-        aif[2] = self.hp.aif.aif['ab']/(1-Hct)
+        aif[2] = self.hp.aif.aif['ab']/(1-Hct[:, 0])
         aif[3] = self.hp.aif.aif['mb']
         aif[4] = self.hp.aif.aif['ae']
         aif[5] = self.hp.aif.aif['me']

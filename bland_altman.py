@@ -25,7 +25,6 @@ parser.add_argument('--dual_path', action='store_true', default=False)
 parser.add_argument('--bidirectional', action='store_true', default=False)
 parser.add_argument('--optim', type=str, default='adam')
 parser.add_argument('--weights', action='store_true', default=False)
-parser.add_argument('--multi_dim', action='store_true', default=False)
 
 args = parser.parse_args()
 
@@ -43,7 +42,12 @@ hp.network.weighted_loss = args.weights
 hp.network.dual_path = args.dual_path
 hp.network.bidirectional = args.bidirectional
 
-if args.multi_dim:
+if hp.network.nn in ['convlin', 'convgru', 'unet']:
+    spatiotemporal=True
+else:
+    spatiotemporal=False
+
+if spatiotemporal:
     network = '{}_{}_{}_{}_{}'.format(hp.network.nn,
                                       hp.network.layers,
                                       hp.training.lr,
@@ -51,10 +55,11 @@ if args.multi_dim:
                                       hp.network.dual_path)
 
 else:
-    network = '{}_{}_{}_{}'.format(hp.network.nn,
+    network = '{}_{}_{}_{}_{}'.format(hp.network.nn,
                                    hp.network.layers,
                                    hp.training.lr,
-                                   hp.training.batch_size)
+                                   hp.training.batch_size,
+                                   hp.network.bidirectional)
 
 file = 'pretrained/pretrained_patient_data_'+network+'.pt'
 file_params_mipa = 'params/patient_data_'+network+'_MIPA.p'
@@ -76,7 +81,7 @@ else:
     hp.acquisition.timing = torch.FloatTensor(hp.acquisition.timing).to(hp.device)
     hp.acquisition.FAlist = [hp.acquisition.FA2]
 
-    if args.multi_dim:
+    if spatiotemporal:
         hp.training.val_batch_size = 8
         net = model_3D.DCE_NET(hp).to(hp.device)
         net.load_state_dict(torch.load(file))
@@ -112,7 +117,7 @@ else:
     hp.acquisition.timing = torch.FloatTensor(hp.acquisition.timing).to(hp.device)
     hp.acquisition.FAlist = [hp.acquisition.FA2]
 
-    if args.multi_dim:
+    if spatiotemporal:
         hp.training.val_batch_size = 8
         net = model_3D.DCE_NET(hp).to(hp.device)
         net.load_state_dict(torch.load(file))
@@ -201,6 +206,9 @@ vp = np.reshape(params_repro[3], (-1, 160, 160))
 param_lsq = pickle.load(open('params/param_maps_patients_lsq_REPRO.p', "rb"))
 
 for patient in range(1, 11):
+    if patient == 13:
+        continue
+
     for i in range(1, 3):
         patient_ke_masked_means = np.array([])
         patient_ve_masked_means = np.array([])
@@ -231,21 +239,22 @@ for patient in range(1, 11):
                                                     (ve[slice]*mask[j])[np.nonzero(ve[slice]*mask[j])])
                 patient_vp_masked_means = np.append(patient_vp_masked_means,
                                                     (vp[slice]*mask[j])[np.nonzero(vp[slice]*mask[j])])
-
-                patient_ke_masked_means_lsq = np.append(patient_ke_masked_means_lsq,
-                                                        (param_lsq[slice, 0]*mask[j])[np.nonzero(param_lsq[slice, 0]*mask[j])])
-                patient_ve_masked_means_lsq = np.append(patient_ve_masked_means_lsq,
-                                                        (param_lsq[slice, 2]*mask[j])[np.nonzero(param_lsq[slice, 2]*mask[j])])
-                patient_vp_masked_means_lsq = np.append(patient_vp_masked_means_lsq,
-                                                        (param_lsq[slice, 3]*mask[j])[np.nonzero(param_lsq[slice, 3]*mask[j])])
+                if patient<11:
+                    patient_ke_masked_means_lsq = np.append(patient_ke_masked_means_lsq,
+                                                            (param_lsq[slice, 0]*mask[j])[np.nonzero(param_lsq[slice, 0]*mask[j])])
+                    patient_ve_masked_means_lsq = np.append(patient_ve_masked_means_lsq,
+                                                            (param_lsq[slice, 2]*mask[j])[np.nonzero(param_lsq[slice, 2]*mask[j])])
+                    patient_vp_masked_means_lsq = np.append(patient_vp_masked_means_lsq,
+                                                            (param_lsq[slice, 3]*mask[j])[np.nonzero(param_lsq[slice, 3]*mask[j])])
 
         ke_masked_means[i-1].append(np.mean(patient_ke_masked_means))
         ve_masked_means[i-1].append(np.mean(patient_ve_masked_means))
         vp_masked_means[i-1].append(np.mean(patient_vp_masked_means))
 
-        ke_masked_means_lsq[i-1].append(np.mean(patient_ke_masked_means_lsq))
-        ve_masked_means_lsq[i-1].append(np.mean(patient_ve_masked_means_lsq))
-        vp_masked_means_lsq[i-1].append(np.mean(patient_vp_masked_means_lsq))
+        if patient<11:
+            ke_masked_means_lsq[i-1].append(np.mean(patient_ke_masked_means_lsq))
+            ve_masked_means_lsq[i-1].append(np.mean(patient_ve_masked_means_lsq))
+            vp_masked_means_lsq[i-1].append(np.mean(patient_vp_masked_means_lsq))
 
 
 fig, ax = plt.subplots(1, 3, figsize=(10, 3))
